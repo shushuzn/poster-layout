@@ -10,6 +10,9 @@ param(
     [Parameter(Mandatory = $true)][string]$Out
 )
 $ErrorActionPreference = "Stop"
+# Remember which POWERPNT processes already exist, so the cleanup below can tell
+# "the instance we started" apart from "a window the user has open".
+$pptBefore = @(Get-Process POWERPNT -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
 $ppt = New-Object -ComObject PowerPoint.Application
 $lines = New-Object System.Collections.Generic.List[string]
 try {
@@ -58,4 +61,21 @@ try {
     [GC]::WaitForPendingFinalizers()
     [GC]::Collect()
     [GC]::WaitForPendingFinalizers()
+    # ...and sometimes even that is not enough: the instance survives with the
+    # presentation still open, holding a write lock on the artifact, so the NEXT
+    # build cannot overwrite it (F3 reproducibility then fails too). Kill only
+    # the instances that appeared after we started - never the user's own window.
+    Start-Sleep -Milliseconds 700
+    Get-Process POWERPNT -ErrorAction SilentlyContinue |
+        Where-Object { $pptBefore -notcontains $_.Id } |
+        ForEach-Object {
+            Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+        }
+    # Drop the leftover lock files our killed instances may have left behind.
+    $dir = Split-Path -Parent $Path
+    $leaf = Split-Path -Leaf $Path
+    $lock = Join-Path $dir ("~`$" + $leaf)
+    if (Test-Path -LiteralPath $lock) {
+        Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
+    }
 }
