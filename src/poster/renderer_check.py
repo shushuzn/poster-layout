@@ -75,17 +75,29 @@ def available() -> bool:
 
 
 def dump_shapes(pptx) -> list[ShapeGeom]:
-    """让 PowerPoint 打开 pptx 并导出所有形状几何量。"""
+    """让 PowerPoint 打开 pptx 并导出所有形状几何量。
+
+    **打开的是产物的副本，不是产物本身。** PowerPoint 会给它打开的文件加共享锁、
+    并留下 ``~$<名>.pptx`` owner 文件；只要实例没退干净，**下一轮构建就写不进
+    产物**（``pptx`` 打包时会抛 ``PermissionError``，F3 复现性跟着红）。
+    复核只读内容，副本完全等价，于是产物再也不可能被渲染器锁住。
+    """
     out = Path(tempfile.gettempdir()) / "poster_ppt_dump.tsv"
     if out.exists():
         out.unlink()
-    cmd = ["powershell", "-NoProfile", "-File", str(DUMP_PS1),
-           str(Path(pptx).resolve()), str(out)]
-    # PowerShell 的 stdout 是本地代码页（中文 GBK），不能按 UTF-8 解；只取字节再容错解码
-    r = subprocess.run(cmd, capture_output=True, timeout=300)
-    so = ((r.stdout or b"") + (r.stderr or b"")).decode("utf-8", "replace")
-    if r.returncode != 0 or not out.exists():
-        raise RuntimeError("PowerPoint 打不开或导出失败（exit=%s）：\n%s" % (r.returncode, so))
+    probe_dir = Path(tempfile.mkdtemp(prefix="poster_probe_"))
+    probe = probe_dir / Path(pptx).name
+    shutil.copy2(pptx, probe)
+    try:
+        cmd = ["powershell", "-NoProfile", "-File", str(DUMP_PS1),
+               str(probe), str(out)]
+        # PowerShell 的 stdout 是本地代码页（中文 GBK），不能按 UTF-8 解；只取字节再容错解码
+        r = subprocess.run(cmd, capture_output=True, timeout=300)
+        so = ((r.stdout or b"") + (r.stderr or b"")).decode("utf-8", "replace")
+        if r.returncode != 0 or not out.exists():
+            raise RuntimeError("PowerPoint 打不开或导出失败（exit=%s）：\n%s" % (r.returncode, so))
+    finally:
+        shutil.rmtree(probe_dir, ignore_errors=True)
     rows = [ln.split("\t") for ln in out.read_text(encoding="utf-8-sig").splitlines() if ln.strip()]
     return [ShapeGeom(x) for x in rows]
 

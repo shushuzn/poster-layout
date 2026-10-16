@@ -7,6 +7,10 @@
 """
 from __future__ import annotations
 
+import os
+import time
+from pathlib import Path
+
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_LINE_DASH_STYLE
@@ -318,8 +322,27 @@ class PosterWriter:
         return len(self.slide.shapes)
 
     def save(self, path):
-        self.prs.save(str(path))
-        freeze_zip(path)          # 归一化 zip 时间戳，保证同输入同字节
+        """原子落盘：先写同目录临时文件，再 ``os.replace`` 顶掉目标。
+
+        为什么不直接 ``prs.save(目标)``：目标随时可能被外部程序（PowerPoint 查看、
+        资源管理器预览、同步 / 索引 / 查杀服务）以共享方式打开着，python-pptx 会
+        直接抛 ``PermissionError``，**整个构建随之失败**（F3 复现性也跟着红）。
+        改成"写临时文件 + 原子替换"只动目录项，这类占用基本都能绕开；仍失败时
+        退避重试几轮，且**原产物中途不会被写坏**。
+        """
+        path = Path(path)
+        tmp = path.with_name(path.stem + ".tmp" + path.suffix)
+        last = None
+        for i in range(5):
+            try:
+                self.prs.save(str(tmp))
+                freeze_zip(tmp)      # 归一化 zip 时间戳，保证同输入同字节
+                os.replace(tmp, path)
+                return
+            except OSError as e:     # 目标被占用 / 共享冲突：等一下再试
+                last = e
+                time.sleep(0.4 * (i + 1))
+        raise RuntimeError("产物写入失败（反复被占用）：%s" % last)
 
 
 def build_pptx(lay: Layout, task, figs, template_path, out_path) -> int:

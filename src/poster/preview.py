@@ -13,6 +13,8 @@
 from __future__ import annotations
 
 import math
+import os
+import time
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -229,6 +231,27 @@ def render(lay: Layout, task, figs, base: Image.Image | None = None,
     return t
 
 
+def _save_png(im: Image.Image, path: Path, tries: int = 4) -> None:
+    """原子落盘 PNG：先写同目录临时文件，再 ``os.replace`` 顶掉目标。
+
+    为什么不直接 ``im.save(目标)``：那会**以写模式打开目标本身**，只要目标
+    此刻正被别的程序（图片查看器、资源管理器缩略图、同步 / 索引服务）以共享读
+    方式打开，就会拿到 ``OSError``（实测 Errno 22 / 13），**整个构建随之崩掉**。
+    改成"写临时文件 + 原子替换"只需改目录项，这类读锁基本都能绕开；
+    万一仍失败，退避重试几轮再抛出。
+    """
+    tmp = path.with_name("." + path.name + ".tmp")
+    for i in range(tries + 1):
+        try:
+            im.save(tmp, format="PNG")      # 临时名丢了 .png 后缀，必须显式给格式
+            os.replace(tmp, path)
+            return
+        except OSError:
+            if i == tries:
+                raise
+            time.sleep(0.3 * (i + 1))
+
+
 def save_previews(lay: Layout, task, figs, intro_name: str = C.PREVIEW_INTRO,
                   full_name: str = C.PREVIEW_FULL,
                   max_w: int = 900, max_h: int = 2250) -> tuple[Path, Path]:
@@ -240,12 +263,12 @@ def save_previews(lay: Layout, task, figs, intro_name: str = C.PREVIEW_INTRO,
     thumb.thumbnail((max_w, max_h), Image.LANCZOS)
     p_full = task.dist / full_name
     p_full.parent.mkdir(parents=True, exist_ok=True)
-    thumb.save(p_full)
+    _save_png(thumb, p_full)
 
     intro = full.crop((0,
                        int((C.Y0 - C.PREVIEW_HEAD_PAD) * sc),
                        full.width,
                        int((C.Y1 + C.PREVIEW_FOOT_PAD) * sc)))
     p_intro = task.dist / intro_name
-    intro.save(p_intro)
+    _save_png(intro, p_intro)
     return p_intro, p_full
