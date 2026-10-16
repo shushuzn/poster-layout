@@ -164,6 +164,9 @@ def render(lay: Layout, task, figs, base: Image.Image | None = None,
 
     lh = line_height(lay.body_pt)
     cap_sz = cap_size(lay.body_pt)
+    # 每字符额外字距（px）：与产物里的 a:rPr/@spc 同源，预览必须跟着走，否则
+    # 预览比实排宽/窄，就成了"两个答案"。
+    spc_px = C.CHAR_SPC_PT * C.PT2CM * C.PX_PER_CM
     for c in cells:
         row_top = c.y + C.TITLE_TOP + C.CHIP_H + C.TITLE_GAP + c.off
         if c.style == "stack":
@@ -181,16 +184,13 @@ def render(lay: Layout, task, figs, base: Image.Image | None = None,
         for para in task.paras[c.r]:
             lines = wrap_para(para, lay.body_pt, c.tw * C.MEASURE_SAFETY,
                               policy=C.DRAW_POLICY)
-            for k, (ln, lw) in enumerate(lines):
+            for ln, lw in lines:
                 x = (c.x + C.BP_X) * sc
-                last = (k == len(lines) - 1)
-                extra = 0.0 if last else (c.tw * sc - lw)
-                sp = extra / (len(ln) - 1) if (not last and len(ln) > 1) else 0.0
                 for seg in ln:
                     tok, color, script = unpack(seg)
                     dy = _script_dy(script, lay.body_pt, sc)
                     dr.text((x, yy * sc + dy), tok, font=body_font, fill=color)
-                    x += body_font.getlength(tok) + sp
+                    x += body_font.getlength(tok) + spc_px * len(tok)
                 yy += lh
 
         if not c.has_fig:
@@ -224,7 +224,7 @@ def render(lay: Layout, task, figs, base: Image.Image | None = None,
                             tok, col, script = unpack(seg)
                             dr.text((cx, cy + _script_dy(script, cap_sz, sc)), tok,
                                     font=cf, fill=col)
-                            cx += cf.getlength(tok)
+                            cx += cf.getlength(tok) + spc_px * len(tok)
                         cy += cap_line_height(cap_sz) * sc
                 x += fw + C.FIG_GAP_IN
             y += ih + C.CAP_LINEGAP + caph + C.FIG_ROW_GAP

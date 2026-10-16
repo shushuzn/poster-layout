@@ -94,6 +94,7 @@ class Task:
     rows: list[list[int]]
     row_fracs: list[list[float]]
     area: tuple[float, float, float, float] | None      # None = 自动探测
+    number: str = ""                   # 作品编号；空 = 模板里的编号框一字不动
     style: dict = field(default_factory=dict)
     meta: dict = field(default_factory=dict)
     _paras_cache: list = field(default_factory=list, repr=False, compare=False)
@@ -483,6 +484,7 @@ def parse_task(path) -> Task:
         rows=rows,
         row_fracs=fracs,
         area=area,
+        number=str(meta.get("number") or "").strip(),
         style=meta.get("style") or {},
         meta=meta,
     )

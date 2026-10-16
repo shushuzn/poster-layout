@@ -188,7 +188,7 @@ class PosterWriter:
         return c
 
     def add_text(self, x, y, w, h, paras, size, color=C.BLACK,
-                 align=PP_ALIGN.JUSTIFY, line_factor=C.LINE_FACTOR):
+                 align=PP_ALIGN.LEFT, line_factor=C.LINE_FACTOR):
         tb = self.slide.shapes.add_textbox(Cm(x), Cm(y), Cm(w), Cm(h))
         tf = tb.text_frame
         tf.word_wrap = True
@@ -220,6 +220,8 @@ class PosterWriter:
                 r.font.name = C.FONT_FAMILY
                 r.font.color.rgb = RGBColor(*col)
                 rPr = r._r.get_or_add_rPr()
+                # 字符间距（1/100 pt）：汉字密排时透一口气。量宽侧同口径，见 typography._spc_px
+                rPr.set("spc", str(int(round(C.CHAR_SPC_PT * 100))))
                 if script in C.SCRIPT_BASELINE:      # 化学式上/下标：只位移，不缩放
                     rPr.set("baseline", str(C.SCRIPT_BASELINE[script]))
                 self._set_ea_font(rPr)
@@ -244,6 +246,30 @@ class PosterWriter:
                 sh.width = Cm(0.01)
                 sh.height = Cm(0.01)
                 return True
+        return False
+
+    def set_number(self, number: str) -> bool:
+        """把模板的「作品编号」框改成 ``作品编号：<number>``。
+
+        模板里这个框预置的是占位文案（例如「作品编号：对应缴费编号」）。只有
+        任务文档写了 ``number:`` 才动它 —— 没写就**一字不改**，与作品名称 /
+        项目成员 / 本科生组三个字段一样。格式沿用原框第一个 run 的字号与颜色，
+        只换文字，不新建 run。
+        """
+        if not number:
+            return False
+        for sh in self.slide.shapes:
+            if not sh.has_text_frame:
+                continue
+            if not sh.text_frame.text.strip().startswith(C.NUMBER_PREFIX):
+                continue
+            runs = sh.text_frame.paragraphs[0].runs
+            if not runs:
+                continue
+            runs[0].text = "%s：%s" % (C.NUMBER_PREFIX, number)
+            for r in runs[1:]:                  # 占位文案若被拆成多段 run，清掉尾巴
+                r.text = ""
+            return True
         return False
 
     def place_figs(self, bf, caps_rows, ix: float, iy: float, ihs: list,
@@ -287,6 +313,7 @@ class PosterWriter:
         if with_plate:
             self.rrect(C.X0, C.Y0, C.W, C.H, dashed=False, line=None, grad=False)
         self.clear_placeholder()
+        self.set_number(getattr(task, "number", ""))
 
         cells = lay.cells
         for c in cells:                                   # 块底

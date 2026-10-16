@@ -43,6 +43,37 @@ def _minimal_doc(body: str, extra: str = "") -> str:
     )
 
 
+# ---------------------------------------------------------------- 作品编号
+def test_number_field_reaches_task():
+    """``number:`` 要能解析进任务；不写就是空串（模板编号框一字不动）。"""
+    body = "## 甲\n\n正文。\n"
+    with tempfile.TemporaryDirectory() as tmp:
+        t = spec.parse_task(_write(tmp, _minimal_doc(body, "number: QB001\n")))
+        assert t.number == "QB001"
+        t2 = spec.parse_task(_write(tmp, _minimal_doc(body), name="b.md"))
+        assert t2.number == ""
+
+
+def test_set_number_rewrites_only_the_number_box():
+    """给了编号才覆写「作品编号」框，其余模板字段与形状数一字不动。"""
+    from poster.writer import PosterWriter
+
+    def texts(w):
+        return [sh.text_frame.text.strip() for sh in w.slide.shapes
+                if sh.has_text_frame and sh.text_frame.text.strip()]
+
+    w = PosterWriter(TEMPLATE)
+    before = texts(w)
+    assert w.set_number("") is False, "没给编号时不该碰模板"
+    assert texts(w) == before
+
+    assert w.set_number("QB001") is True
+    after = texts(w)
+    assert "作品编号：QB001" in after
+    assert "作品编号：DEMO-0001" not in after
+    assert len(after) == len(before), "覆写不该增删形状"
+
+
 # ---------------------------------------------------------------- 富文本
 def test_emphasis_becomes_red():
     segs = spec.rich_text("甲**乙**丙")

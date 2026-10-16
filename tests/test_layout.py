@@ -257,21 +257,94 @@ def test_punctuation_policy_matches_renderer():
     """
     from poster import typography as TY
 
-    txt = "一二三四五六七八九十、"          # 10 个全角字正好占满 1.20cm，标点放不下
-    hang = TY.wrap_para([(txt, "x")], 3.45, 1.20, "hang")
-    push = TY.wrap_para([(txt, "x")], 3.45, 1.20, "push")
+    txt = "一二三四五六七八九十、"          # 10 个全角字 + 标点：10 字占满 1.28cm
+    hang = TY.wrap_para([(txt, "x")], 3.45, 1.28, "hang")
+    push = TY.wrap_para([(txt, "x")], 3.45, 1.28, "push")
     assert len(hang) == 1 and hang[0][0][-1][0] == "、"
     assert len(push) == 2 and push[1][0][0][0] == "、"
 
 
 def test_worst_policy_never_underestimates():
-    """求解用的行数取两种标点策略里更悲观的那个。"""
+    """求解用的行数取**所有**标点策略里最悲观的那个。
+
+    漏掉任何一个策略都会少算行数：2026-10-16 传感块就是漏掉 ``pull``
+    那一行，估算 10 行、实排 11 行，末行压到了图上。
+    """
     from poster import typography as TY
 
     txt = "一二三四五六七八九十、一二三四五六七八九十、"
     n = TY.lines_count_worst([[(txt, "x")]], 3.45, 1.20)
-    assert n >= TY.lines_count([[(txt, "x")]], 3.45, 1.20, "hang")
-    assert n >= TY.lines_count([[(txt, "x")]], 3.45, 1.20, "push")
+    for pol in TY.POLICIES:
+        assert n >= TY.lines_count([[(txt, "x")]], 3.45, 1.20, pol), pol
+
+
+def test_pull_policy_keeps_punctuation_off_line_start():
+    """``pull``（行首禁则）：放不下的标点**连同前一个单元**一起下移。
+
+    PowerPoint 悬挂标点挤不下时的真实兜底 —— 下一行不能以标点开头，
+    于是本行少放一个单元，总行数可能比 push / hang 多一行。
+    """
+    from poster import typography as TY
+
+    txt = "一二三四五六七八九十、"          # 10 个全角字占满 1.20cm，标点放不下
+    out = TY.wrap_para([(txt, "x")], 3.45, 1.20, "pull")
+    assert len(out) == 2, out
+    assert out[0][0][-1][0] == "九", out        # 前一个单元被带着下移
+    assert out[1][0][0][0] == "十", out         # 下一行不以标点开头
+    assert len(out) >= len(TY.wrap_para([(txt, "x")], 3.45, 1.20, "push"))
+
+
+def test_measure_safety_is_conservative_enough():
+    """量算宽度必须打折，且折扣够狠。
+
+    Pillow 用同一份字体文件测出的行宽，比 PowerPoint 实排**窄约 1.5%**；
+    0.985 兜不住那一行（估算 10 行 / 实排 11 行），实测 0.97 才够。
+    """
+    from poster import config as C
+
+    assert C.MEASURE_SAFETY <= 0.975, C.MEASURE_SAFETY
+
+
+def test_left_bracket_never_ends_a_line():
+    """行尾禁则：左括号不能孤零零挂在行尾（成了「…（」换行读不通）。"""
+    from poster import typography as TY
+
+    txt = "一二三四五六七八九十(一二"           # 让左括号正好落在行尾位置
+    for pol in TY.POLICIES:
+        for ln, _ in TY.wrap_para([(txt, "x")], 3.45, 1.35, pol):
+            assert not ln[-1][0].endswith(tuple(TY.NO_END)), (pol, ln)
+
+
+def test_wrap_never_duplicates_or_drops_text():
+    """断行必须**无损**：拼接回来要等于原文，不多一个标点、不少一个字。
+
+    2026-10-16 真出过一次：``hang`` 分支删掉 ``continue`` 后，被挤到行尾的
+    标点又被追加进下一行 —— 标点凭空多出一个，且只有 ``hang`` 会中招。
+    """
+    from poster import typography as TY
+
+    txt = "甲乙丙丁戊己庚辛壬癸,甲乙丙丁戊己庚辛壬癸.甲乙丙丁戊己庚辛壬癸"
+    for pol in TY.POLICIES:
+        lines = TY.wrap_para([(txt, "x")], 3.45, 1.20, pol)
+        joined = "".join(t for ln, _ in lines for t, _, _ in ln)
+        assert joined == txt, (pol, joined)
+
+
+def test_script_never_splits_from_its_base():
+    """角标必须紧跟它的基字 —— 任何行宽下都不许把 ``Fe^{3+}`` 拆成 ``Fe`` / ``3+``。"""
+    from poster import spec as S
+    from poster import typography as TY
+
+    segs = S.rich_text("一二三四五六七八九Fe^{3+}的引入有效促进成碳")
+    bad = []
+    for i in range(20, 40):                     # 扫 1.00 ~ 1.95cm 各种行宽
+        for pol in TY.POLICIES:
+            ls = ["".join(t for t, _, _ in ln)
+                  for ln, _ in TY.wrap_para(segs, 3.45, i / 20.0, pol)]
+            for j, s in enumerate(ls[:-1]):
+                if s.endswith("Fe") and ls[j + 1].startswith("3"):
+                    bad.append((i / 20.0, pol, ls))
+    assert not bad, bad[:2]
 
 
 def test_line_height_equals_written_spc_pct():
@@ -333,3 +406,51 @@ def test_script_offset_is_one_glyph_scale():
     assert P._script_dy("", 3.65, sc) == 0.0
     # 位移与字号成正比：换字号只改幅度，不改口径
     assert abs(P._script_dy("sup", 7.3, sc)) > abs(sup), "位移应随字号线性变化"
+
+
+def test_release_version_is_in_sync():
+    """版本号必须三处一致：``poster.__version__`` / ``pyproject.toml`` / ``CHANGELOG.md`` 首条。
+
+    版本号有好几个落脚点，改一处忘另两处，发出去就成了「CHANGELOG 说到 2.9.4、
+    装的包还写着 2.8.0」—— 正是"仓库没收拾干净"最典型的样子，而且没人会主动去核。
+    """
+    import re
+
+    from poster import __version__
+
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    m = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.M)
+    assert m, "pyproject.toml 里没找到 version"
+    assert m.group(1) == __version__, "pyproject %s != __version__ %s" % (m.group(1), __version__)
+
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    first = re.search(r"^##\s*\[([0-9][^\]]*)\]", changelog, re.M)
+    assert first, "CHANGELOG.md 里没找到版本条目"
+    assert first.group(1).startswith(__version__), (
+        "CHANGELOG 首条 %s 与 __version__ %s 不一致" % (first.group(1), __version__))
+
+
+def test_skill_is_in_sync():
+    """Skill 必须随仓库发布，且与「已加载到本机的那一份」逐字节相同。
+
+    ``skills/poster-layout/SKILL.md`` 是唯一源；开发时把它复制到 ``.workbuddy/skills/``
+    让助手立即用上。副本靠手工复制，最容易改了一边忘另一边 —— 助手照旧手册操作，
+    仓库里却已经换了说法，而且没人会发现。这条把两份钉成同一份。
+    """
+    import re
+
+    from poster import __version__
+
+    src = ROOT / "skills" / "poster-layout" / "SKILL.md"
+    assert src.is_file(), "缺少 skills/poster-layout/SKILL.md（Skill 要随仓库发布）"
+    text = src.read_text(encoding="utf-8")
+
+    assert "name: poster-layout" in text, "SKILL.md 的 front-matter 缺少 name: poster-layout"
+    m = re.search(r"^version:\s*([0-9][^\s]*)\s*$", text, re.M)
+    assert m, "SKILL.md 的 front-matter 里没有 version"
+    assert m.group(1) == __version__, "SKILL 版本 %s != 引擎 %s" % (m.group(1), __version__)
+
+    copy = ROOT / ".workbuddy" / "skills" / "poster-layout" / "SKILL.md"
+    if copy.is_file():                    # 只在本机存在；clone 下来的人没有，跳过
+        assert copy.read_bytes() == src.read_bytes(), (
+            "本机副本 .workbuddy/skills/poster-layout/SKILL.md 与仓库版不同，请重新复制")

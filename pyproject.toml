@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "poster-kit"
-version = "2.8.0"
+version = "2.9.5"
 description = "通用墙报（学术海报）排版引擎：读一份任务文档，自动求解版式并填充模板 pptx"
 readme = "README.md"
 requires-python = ">=3.10"

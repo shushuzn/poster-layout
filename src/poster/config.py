@@ -48,6 +48,11 @@ SCRIPT_BASELINE = {"sup": 30000, "sub": -25000}
 # 换成别的赛事模板时，若探测不准，请改用任务文档里的显式 ``area:``。
 PH_TOP, PH_TOP_TOL, PH_MIN_W = 8.52, 0.6, 5.5
 
+# 模板里「作品编号」框的文字前缀。任务文档写了 ``number:`` 才按
+# ``<前缀>：<编号>`` 覆写这个框；没写就一字不动（与作品名称 / 项目成员 /
+# 本科生组三个模板字段同等待遇）。
+NUMBER_PREFIX = "作品编号"
+
 # 占位框 -> 实际可排版内区的内缩量（left, top, right, bottom，实测值）。
 # 占位框比真正的白底内区略大：左 0.05、上 0.22、下 0.42cm，右边恰好齐平。
 AREA_INSET = (0.05, 0.22, 0.00, 0.42)
@@ -84,13 +89,30 @@ CHIP_PAD_X = 0.11                       # 胶囊内左右留白
 
 LINE_FACTOR = 1.60                      # 行距倍数（行高 = 字号 x 本值）
 LINE_REF_FACTOR = 1.20                  # PowerPoint「单倍行距」= 字号 x 本值，换算 spcPct 用
-MEASURE_SAFETY = 0.985                  # 量算宽度打 98.5% 折，抵掉渲染器的断行差异
+MEASURE_SAFETY = 0.97                   # 量算宽度打折，抵掉渲染器的断行差异
+#
+# 取值依据（2026-10-16 实测）：Pillow 用同一份字体文件测出的行宽，比 PowerPoint
+# 实排**窄约 1.5%** —— 于是偶发"估算 10 行、实排 11 行"，末行压到下面的图上
+# （传感块在 2.87cm 分栏宽度下复现）。0.985 兜不住这一行，0.97 才够。
+# 注意这是**全局**系数：一旦真出现估算/实排不一致，先怀疑这里，
+# 但**不要把 F5 实排复核当成可选项**——它是这类差异的最后一道闸。
+
+# 正文**字符间距**（pt/字），写进 pptx 的 run 属性 ``a:rPr/@spc``（单位 1/100 pt）。
+# 0.1pt 让密排的汉字之间透一口气；量算宽度时**必须**把它算进去（见 typography._spc_px），
+# 否则求解器会以为每行比实际窄，行数估少、末行压到图上。
+CHAR_SPC_PT = 0.1
+
+# 量宽时把字距**放大**这么多倍再算（只影响求解，不影响写进 pptx 的值）。
+# 为什么：字距是**绝对量、不随字号缩放**，而 Pillow 量出的字宽本就比 PowerPoint
+# 实排窄一点；两条误差叠加后，1x 计字距仍会偶尔少算一行（2026-10-16 实测，
+# 窄栏块实排 8 行、模型 7 行，末行压到图上）。取 2x 作悲观估计。
+CHAR_SPC_MEASURE_SCALE = 2.0
 
 # 行尾标点要不要「悬挂」在行外（中西文混排里叫悬挂标点）
 #   True  -> pptx 里写 bodyPr/@hangingPunct="1"，渲染器让行尾标点溢出边界，
 #            于是行首不会出现「，。、」；本引擎按 hang 策略画，与渲染器一致。
 #   False -> 用渲染器的默认行为（把标点推到下一行），行首可能出现标点。
-# 无论取哪个值，**求解尺寸一律用两种策略里更悲观的那个**（见 lines_count_worst），
+# 无论取哪个值，**求解尺寸一律用三种策略里最悲观的那个**（见 lines_count_worst），
 # 所以换成别的渲染器也不会溢出。
 HANG_PUNCT = True
 DRAW_POLICY = "hang" if HANG_PUNCT else "push"     # 由 _recompute() 保持同步
@@ -111,10 +133,11 @@ STEPS = 0.05                            # 搜索步长
 # 上限来自示例（assets/ref 里的样张）量出的图文比：示例全篇约 250~300 汉字，
 # 最重的文本块约 130 字，其余板块基本只有图 + 短标签。
 #
-# 2026-10-16 按用户拍板的**详版文案**放宽（原先 120 / 550 卡死了它）：
+# 2026-10-16 按一份需要把机制讲清楚的**详版文案**放宽（原先 120 / 550 卡死了它）：
 # 该版单块最多 201 汉字、全篇 752 汉字，正文 3.30pt（实印 33pt，仍远高于
 # B2 的 2.60pt 下限）—— 这种密度是"讲清楚"，不是"小字报"，用示例的图文比
-# 一刀切反而把该说的内容砍掉了。计数口径 = **汉字**（不含数字 / 英文 / 标点）。
+# 一刀切反而把该说的内容砍掉了。**放宽的正当性只来自字号仍够大，不来自字写多了。**
+# 计数口径 = **汉字**（不含数字 / 英文 / 标点）。
 TEXT_CHAR_BLOCK_MAX = 220               # 单个分块的正文汉字数上限
 TEXT_CHAR_TOTAL_MAX = 800               # 全篇分块正文的汉字数上限
 
@@ -170,7 +193,7 @@ OVERRIDABLE = {
     "FIG_GAP_IN", "TEXT_IMG_GAP", "CAP_LINEGAP", "CAP_H", "CAP_LINE_FACTOR",
     "RADIUS", "BORDER_W",
     "TITLE_SZ", "TITLE_TOP", "TITLE_GAP", "CHIP_PAD_X", "LINE_FACTOR",
-    "LINE_REF_FACTOR", "MEASURE_SAFETY", "HANG_PUNCT",
+    "LINE_REF_FACTOR", "MEASURE_SAFETY", "CHAR_SPC_PT", "CHAR_SPC_MEASURE_SCALE", "HANG_PUNCT",
     # 求解器
     "BODY_MAX", "BODY_MIN", "IH_MAX", "IH_MIN", "IH_FLOOR", "IH_MIN_READABLE",
     "SIDE_MIN", "TW_MIN", "BODY_TARGET", "STEPS",
@@ -286,7 +309,8 @@ _DEFAULTS.update({
         "FIG_GAP_IN", "TEXT_IMG_GAP", "CAP_LINEGAP", "CAP_H", "CAP_LINE_FACTOR",
     "RADIUS", "BORDER_W",
         "TITLE_SZ", "TITLE_TOP", "TITLE_GAP", "CHIP_PAD_X", "LINE_FACTOR",
-        "MEASURE_SAFETY", "PT2CM", "LINE_REF_FACTOR", "HANG_PUNCT", "DRAW_POLICY",
+        "MEASURE_SAFETY", "PT2CM", "LINE_REF_FACTOR", "CHAR_SPC_PT",
+        "CHAR_SPC_MEASURE_SCALE", "HANG_PUNCT", "DRAW_POLICY",
         # 求解器
         "BODY_MAX", "BODY_MIN", "IH_MAX", "IH_MIN", "IH_FLOOR", "IH_MIN_READABLE",
         "SIDE_MIN", "TW_MIN", "BODY_TARGET", "STEPS",

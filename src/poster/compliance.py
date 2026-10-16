@@ -192,11 +192,21 @@ def _norm_color(s) -> str:
 
 # ---- 范围 --------------------------------------------------------
 def _a1(ctx):
+    """模板既有字段一字未改 —— 唯一例外是「作品编号」框。
+
+    任务文档写了 ``number:`` 时，引擎会把这个框覆写成「作品编号：<编号>」
+    （见 ``writer.set_number``），此时它不参与「原样保留」的比对；没写
+    ``number:`` 就仍然一字不改。
+    """
+    skip = C.NUMBER_PREFIX if getattr(ctx.task, "number", "") else ""
+    kept = [t for t in ctx.template_texts
+            if not (skip and t.startswith(skip))]
     joined = "\n".join(t[4] for t in ctx.texts)
-    missing = [t for t in ctx.template_texts if t.replace("\n", "") not in joined.replace("\n", "")]
-    return (not missing,
-            "模板 %d 个既有字段原样保留" % len(ctx.template_texts) if not missing
-            else "模板字段被改动/删除: %s" % missing)
+    missing = [t for t in kept if t.replace("\n", "") not in joined.replace("\n", "")]
+    if missing:
+        return False, "模板字段被改动/删除: %s" % missing
+    return True, "模板 %d 个既有字段原样保留%s" % (
+        len(kept), "（编号框按 number: 覆写）" if skip else "")
 
 
 def _a2(ctx):
@@ -547,6 +557,27 @@ def _c11(ctx):
             % (len(shapes), on) if not bad else "悬挂标点设置不一致: %s" % "；".join(bad))
 
 
+def _c12(ctx):
+    """正文**不用两端对齐** —— 渲染器会把中文也拉开字距，行里冒出"假空格"。
+
+    两端对齐（``just``）把每行剩余宽度摊到字与字之间：中文同样被撑开，
+    一句话里的「升至」看起来就成了「升 至」，读者会以为文案里插了空格
+    （2026-10-16 用户就是照着渲染图来问的）。左对齐下多余宽度只落在行尾，
+    中文间距恒定。图注仍是居中，不受这条影响。
+    """
+    from pptx.enum.text import PP_ALIGN
+
+    shapes = _text_shapes(ctx, textbox_only=True)
+    bad = []
+    for sh in shapes:
+        for p in sh.text_frame.paragraphs:
+            if p.alignment == PP_ALIGN.JUSTIFY:
+                bad.append("「%s…」" % p.text.strip()[:8])
+                break
+    return (not bad, "%d 个文本框都不用两端对齐（中文字距恒定，不会被拉伸成假空格）" % len(shapes)
+            if not bad else "有段落用了两端对齐，中文会被撑开: %s" % "；".join(bad))
+
+
 # ---- 图文 --------------------------------------------------------
 def _d1(ctx):
     bad = []
@@ -784,7 +815,7 @@ def _f5(ctx):
 # ---------------------------------------------------------------- 清单
 REQUIREMENTS: list[Item] = [
     # 范围
-    Item("A1", "范围", "只动「作品简介」区，模板既有字段一字未改", "模板/评审", "hard", _a1),
+    Item("A1", "范围", "只动「作品简介」区，模板既有字段一字未改（`number:` 覆写的编号框除外）", "模板/评审", "hard", _a1),
     Item("A2", "范围", "模板背景图保留，配图数与文档声明一致", "模板", "hard", _a2),
     # 尺寸
     Item("B1", "尺寸", "画布不被改动（8x20cm 缩放稿 = 实印 80x200cm）", "模板", "hard", _b1),
@@ -805,6 +836,7 @@ REQUIREMENTS: list[Item] = [
     Item("C9", "版式", "行距写 spcPct（spcPts 会被渲染器取整到整点）", "工程", "hard", _c9),
     Item("C10", "版式", "bodyPr 的自动调整子元素至多一个", "工程", "hard", _c10),
     Item("C11", "版式", "悬挂标点开关与断行策略一致", "工程", "hard", _c11),
+    Item("C12", "版式", "正文不用两端对齐（中文会被渲染器拉伸成假空格）", "工程", "hard", _c12),
     # 图文
     Item("D1", "图文", "每张图都落在声明它的那个分块内（防止错配）", "评审", "hard", _d1),
     Item("D2", "图文", "一张图一条图注，不得几图共用一注", "评审", "hard", _d2),

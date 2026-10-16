@@ -28,7 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from . import config as C
-from .typography import line_count, line_height, lines_count_worst
+from .typography import POLICIES, line_count, line_height, lines_count_worst
 
 # ---------------------------------------------------------------- 数据结构
 
@@ -164,8 +164,8 @@ def caption_block_height(caps, ih: float, spans, cap_sz: float) -> float:
         if not cap:
             continue
         w = max(0.25, ih * span)
-        n = max(n, line_count([(cap, "gray")], cap_sz, w),
-                line_count([(cap, "gray")], cap_sz, w, "hang"))
+        n = max(n, max(line_count([(cap, "gray")], cap_sz, w, pol)
+                       for pol in POLICIES))
     return n * cap_line_height(cap_sz)
 
 

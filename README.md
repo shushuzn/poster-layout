@@ -8,8 +8,9 @@
 逐块分派图文排法，产出成品 pptx 与预览图。
 
 > 正文字数是这张海报的**第一自变量**：字越多 → 字号被压得越小 → 上了墙谁也看不清。
-> 引擎因此对正文字数设了硬上限（单块 120 / 全篇 550 汉字，见合规项 `E6`），
-> 上限取自示例的图文比 —— 海报是看图为主、站着远看的媒介，不是能凑近读的小字报。
+> 引擎因此对正文字数设了硬上限（单块 220 / 全篇 800 汉字，见合规项 `E6`，
+> 可用任务的 `style:` 覆盖）。**超限时删铺垫句，不要放宽阈值** —— 海报是看图为主、
+> 站着远看的媒介，不是能凑近读的小字报。
 
 > 仓库里随附一份**示例任务** [`tasks/demo`](tasks/demo/task.md)：它的模板与配图
 > 都由 [`tools/make_demo.py`](tools/make_demo.py) 合成，文案是示意内容，
@@ -107,6 +108,8 @@ grid:
 ```
 .
 ├── build.py                  # 入口
+├── skills/                   # 随仓库发布的 Skill（AI 助手的操作手册，见下）
+│   └── poster-layout/SKILL.md
 ├── tasks/                    # ★ 所有墙报任务
 │   ├── _template.md          # 新任务骨架
 │   ├── README.md
@@ -165,14 +168,14 @@ tasks/<id>/assets/*.png
 python build.py demo --check      # 或 make check
 ```
 
-构建完立刻逐条对照 [`docs/compliance.md`](docs/compliance.md) 的清单（**39 项**：
-硬性 34 / 提示 2 / 人工 3），把报告写到 `dist/compliance-<任务id>.md`。
+构建完立刻逐条对照 [`docs/compliance.md`](docs/compliance.md) 的清单（**40 项**：
+硬性 35 / 提示 2 / 人工 3），把报告写到 `dist/compliance-<任务id>.md`。
 **硬性项全部通过则退出码 0，否则 2** —— 可以直接串进脚本，红了就别提交。
 
 清单覆盖：范围（模板字段一字不动）、尺寸（画布 / 字号 / 不溢出 / 图不压成细缝）、
 版式（虚线圆角框 / 渐变 / 胶囊骑线 / 版面节奏 / 图文同框）、
 渲染器一致性（**行距写 `spcPct`** / 文字需要高 ≤ 声明框高 / 自动调整至多一个 /
-悬挂标点与断行策略一致）、
+悬挂标点与断行策略一致 / 正文不用两端对齐）、
 图文对位（**一张图一条图注**、图必须落在声明它的块内、图号连续、图注居中在图下）、
 文字（无缺失字形 / 无未完成痕迹 / **正文字数有上限**）、交付（产物可打开 / 构建可复现 /
 **PowerPoint 实排复核无压图**）。
@@ -184,6 +187,27 @@ python build.py demo --check      # 或 make check
 
 一条新要求怎么加：在 `src/poster/compliance.py::REQUIREMENTS` 里加 `Item`，
 同时在 `docs/compliance.md` 补一行 —— 两边不一致会**直接测试失败**。
+
+---
+
+## Skill：给 AI 助手的操作手册
+
+[`skills/poster-layout/SKILL.md`](skills/poster-layout/SKILL.md) 把「怎么用这个引擎」写成一份
+可被 AI 助手直接加载的 Skill：什么时候该用它、动手前必须先读的不变式、从备料到交付的七步流程、
+`task.md` 速查表、交付前检查单，以及会复发的坑。
+
+**它和 README 是两种读者**：README 给人看（先讲设计意图与全貌），SKILL 给助手看
+（先讲"别踩什么"和"从哪一步开始"）。改引擎的公开行为时两边都要同步。
+
+加载方式（任选其一）：
+
+```bash
+cp -r skills/poster-layout .workbuddy/skills/     # 项目级：在本仓库开发时生效
+cp -r skills/poster-layout ~/.workbuddy/skills/   # 用户级：所有项目都能用
+```
+
+版本号三处一致（`pyproject.toml` / `src/poster/__init__.py` / `CHANGELOG.md` 首条）由
+`tests/test_layout.py::test_release_version_is_in_sync` 守着，`python build.py --version` 可查。
 
 ---
 
@@ -266,6 +290,7 @@ python build.py demo --no-preview && md5sum dist/demo-poster.pptx   # 两次必�
 | 换背景图提取方式 / 内容区探测规则 | `src/poster/template.py` |
 | 加 / 改一条合规要求 | `src/poster/compliance.py` + `docs/compliance.md`（两边必须一致） |
 | 改「文字压图 / 溢出」的判定口径 | `src/poster/renderer_check.py` |
+| 改 AI 助手看到的操作手册 | `skills/poster-layout/SKILL.md`（改完重新复制到 `.workbuddy/skills/`） |
 
 ---
 

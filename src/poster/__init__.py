@@ -24,4 +24,4 @@ from .spec import Section, Task, parse_task  # noqa: F401
 
 __all__ = ["build", "main", "prepare", "parse_task", "Task", "Section",
            "template_path", "OUT_NAME", "PT2CM", "PX_PER_CM"]
-__version__ = "2.8.0"
+__version__ = "2.9.5"

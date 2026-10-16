@@ -6,8 +6,18 @@
 
 ⚠️ 断行策略必须**跟渲染器一致**，否则会少算出行数、末行被下面的图盖住
    （2026-10-14 实际发生的版面事故，见 docs/rendering-notes.md）。
-   PowerPoint / WPS 遇到行尾放不下的标点时，是把标点**推到下一行**（``push``），
-   不是把标点挤在行尾（``hang``）。所以默认策略是 ``push``。
+
+   行尾标点放不下时，渲染器可能有**三种**做法，本模块全部实现：
+
+   * ``push`` —— 标点单独推到下一行（下一行会以标点开头）；
+   * ``hang`` —— 标点挤出边界、悬挂在行外（``bodyPr/@hangingPunct="1"`` 时的行为）；
+   * ``pull`` —— **行首禁则**：标点不能落在行首，于是把它连同**前一个单元**
+     一起移到下一行。这是 PowerPoint 在"悬挂标点挤不下"时的真实兜底做法，
+     行数可能比前两者都多。
+
+   **求解尺寸一律取三者中最悲观的行数**（见 :func:`lines_count_worst`）。
+   只看 ``push``/``hang`` 会漏掉 ``pull`` 那一行 —— 表现为"估算 10 行、
+   实排 11 行"，末行压到图上（2026-10-16 在传感块复发过一次）。
 """
 from __future__ import annotations
 
@@ -15,6 +25,7 @@ import re
 
 from PIL import ImageFont
 
+from . import config as _cfg
 from .config import (
     BLACK,
     FONT,
@@ -29,13 +40,17 @@ from .config import (
 # 不可置于行首的标点（避头尾）
 NO_START = set("，。、；：？！）》」』】…·,.;:?!)%")
 
+# 不可置于**行尾**的字符：左括号不能孤零零挂在行尾（"…（" 换行读不通）
+NO_END = set("([{（【《「『")
+
 # 数字 / 单位 / 化学式视为整体，不拆开
 _TOKEN_RE = re.compile(r"[\-+/~≈°]?[0-9][0-9A-Za-z.%\-+/°~]*|[A-Za-z][A-Za-z0-9+\-]*")
 
 _FONT_CACHE: dict[tuple[float, bool], ImageFont.FreeTypeFont] = {}
 
-# 标点落在行尾、放不下时的两套做法（见模块 docstring）
-POLICIES = ("push", "hang")
+# 标点落在行尾、放不下时的几种做法（见模块 docstring）
+# 「求解尺寸」取三者中最悲观的那一个，见 lines_count_worst
+POLICIES = ("push", "hang", "pull")
 
 
 def font(size: float, bold: bool = False) -> ImageFont.FreeTypeFont:
@@ -85,38 +100,73 @@ def tokenize(segments) -> list[tuple[str, tuple[int, int, int], str]]:
     return out
 
 
+def _spc_px() -> float:
+    """量宽用的**每字符字距**（px）—— 实写字距放大 :data:`CHAR_SPC_MEASURE_SCALE` 倍。
+
+    量宽时按悲观估计（放大）而不是照抄实排值：字距是绝对量、不随字号缩放，
+    再叠加 Pillow 与 PowerPoint 之间那点固有偏差，1x 计字距仍会偶尔少算一行
+    （2026-10-16 实测：窄栏块实排 8 行、模型 7 行，末行压到图上）。
+    写进 pptx 的仍是 :data:`CHAR_SPC_PT` 本身（见 writer.add_text）。
+    """
+    return (_cfg.CHAR_SPC_PT * _cfg.CHAR_SPC_MEASURE_SCALE
+            * _cfg.PT2CM * _cfg.PX_PER_CM)
+
+
 def wrap_para(segments, size: float, width_cm: float, policy: str = "push"):
     """按 ``width_cm`` 断行，返回 ``[(行内单元列表, 行宽px), ...]``。
 
     ``policy`` 决定行尾放不下的标点怎么办：
 
-    * ``"push"``（默认）—— 推到下一行。这就是 PowerPoint / WPS 的做法，
-      因此引擎的**行数估算**必须用它，否则会少算一行、末行被图盖住。
-    * ``"hang"`` —— 挤在本行末尾（行尾悬挂）。版式上更好看，但除非在
-      ``bodyPr`` 上真的开了悬挂标点，渲染器不会这么做，只可用于预览对比。
+    * ``"push"`` —— 推到下一行（下一行会以标点开头）；
+    * ``"hang"`` —— 挤在本行末尾、溢出边界（行尾悬挂）；渲染器上要真开
+      ``bodyPr/@hangingPunct`` 才会这么做，只可用于预览对比；
+    * ``"pull"``（默认）—— **行首禁则**：标点不落行首，连同前一个单元一起
+      移到下一行。这是 PowerPoint 在悬挂挤不下时的真实兜底，也是三者中
+      行数最多的一个，**求解尺寸必须按它兜底**。
     """
     if policy not in POLICIES:
         raise ValueError("未知的断行策略 %r（可选 %s）" % (policy, "、".join(POLICIES)))
     maxw = width_cm * PX_PER_CM
     f = font(size)
+    spc = _spc_px()                     # 每字符额外字距：量宽必须与渲染器同口径
     lines: list[tuple[list, float]] = []
     cur: list = []
     curw = 0.0
 
+    def _tw(toks) -> float:
+        """一组排版单元的实排宽度（含字符间距）。"""
+        return sum(f.getlength(t[0]) + len(t[0]) * spc for t in toks)
+
     for tok, color, script in tokenize(segments):
-        w = f.getlength(tok)
-        if cur and curw + w > maxw:
+        w = f.getlength(tok) + len(tok) * spc
+        # ``not script``：角标（``^{}``/``_{}``）必须紧跟它的基字 —— 不许在
+        # 基字与角标之间断行，否则会排出"…0.5M A / 2+在三者间"这种断法
+        if cur and curw + w > maxw and not script:
+            # 行尾禁则：左括号之类不能收尾 —— 连同它后面的内容一起挪到下一行
+            tail: list = []
+            while len(cur) >= 2 and cur[-1][0] and cur[-1][0][-1] in NO_END:
+                last = cur.pop()
+                curw -= f.getlength(last[0]) + len(last[0]) * spc
+                tail.insert(0, last)
+            nxt: list = list(tail)
             if policy == "hang" and tok and tok[0] in NO_START:
                 cur.append((tok, color, script))    # 标点不落行首：挤在本行末尾
                 curw += w
                 lines.append((cur, curw))
-                cur, curw = [], 0.0
-                continue
-            lines.append((cur, curw))           # 推标点：本行到这里为止
-            cur, curw = [], 0.0
+                cur, curw = nxt, _tw(nxt)
+                continue                            # 本 token 已处理，别再追加一次
+            if policy == "pull" and tok and tok[0] in NO_START and len(cur) >= 2:
+                # 行首禁则：标点连同**前一个单元**一起移到下一行。
+                # 本行为此少放一个单元，总行数可能比 push / hang 多一行。
+                last = cur.pop()
+                lines.append((cur, curw - f.getlength(last[0]) - len(last[0]) * spc))
+                nxt = [last] + nxt
+            else:
+                lines.append((cur, curw))           # 推标点：本行到这里为止
+            cur, curw = nxt, _tw(nxt)
         if w > maxw:                            # 单个超宽单元：逐字拆
             for ch in tok:
-                cw = f.getlength(ch)
+                cw = f.getlength(ch) + spc
                 if curw + cw > maxw and cur:
                     lines.append((cur, curw))
                     cur, curw = [], 0.0
@@ -131,7 +181,7 @@ def wrap_para(segments, size: float, width_cm: float, policy: str = "push"):
     fixed = []
     for ln, lw in lines:                        # 去掉行尾空白
         while ln and ln[-1][0].strip() == "":
-            lw -= f.getlength(ln[-1][0])
+            lw -= f.getlength(ln[-1][0]) + len(ln[-1][0]) * spc
             ln = ln[:-1]
         fixed.append((ln if ln else [(" ", BLACK, "")], lw))
     return fixed

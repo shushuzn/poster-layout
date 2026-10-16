@@ -124,12 +124,16 @@ def check(task_ref=None, built: dict | None = None, quiet: bool = False) -> int:
 
 
 def main(argv=None) -> int:
+    from . import __version__                # 延迟导入：避免 __init__ → cli 的循环
+
     ap = argparse.ArgumentParser(
         prog="poster",
         description="通用墙报排版引擎：读一份任务文档（tasks/<id>/task.md），"
                     "把图文自动排版并填进官方模板 pptx。")
     ap.add_argument("task", nargs="?", default=None,
                     help="任务：id / 目录 / task.md 路径（省略则取 tasks/ 下唯一的任务）")
+    ap.add_argument("-V", "--version", action="version",
+                    version="poster-kit %s" % __version__)
     ap.add_argument("-o", "--out", default=None, help="覆盖输出文件名（写入任务 dist/）")
     ap.add_argument("--no-preview", action="store_true", help="跳过预览渲染")
     ap.add_argument("-q", "--quiet", action="store_true", help="只输出错误")
