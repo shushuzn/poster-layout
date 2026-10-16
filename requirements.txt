@@ -1,0 +1,11 @@
+# Pillow：图像读取 / 预处理 / 预览渲染
+pillow>=10.0
+
+# python-pptx：读写 PPTX（模板填充）
+python-pptx>=0.6.21
+
+# numpy：裁白边时的像素统计
+numpy>=1.24
+
+# PyYAML：解析任务文档的 front-matter
+PyYAML>=6.0

@@ -1,0 +1,27 @@
+# 统一换行符：源文件用 LF，避免跨平台 diff 噪声
+* text=auto
+*.py    text eol=lf
+*.md    text eol=lf
+*.toml  text eol=lf
+*.txt   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+*.ps1   text eol=lf
+*.cfg   text eol=lf
+Makefile text eol=lf
+.editorconfig   text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+
+# 二进制资源：禁止行尾转换与 diff
+*.pptx  binary
+*.ppt   binary
+*.doc   binary
+*.docx  binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+
+# 锁文件不参与语言统计
+requirements.txt linguist-generated=false

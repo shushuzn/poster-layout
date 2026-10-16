@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "poster-kit"
+version = "2.8.0"
+description = "通用墙报（学术海报）排版引擎：读一份任务文档，自动求解版式并填充模板 pptx"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "shushuzn" }]
+
+dependencies = [
+    "pillow>=10.0",
+    "python-pptx>=0.6.21",
+    "numpy>=1.24",
+    "PyYAML>=6.0",
+]
+
+[project.scripts]
+poster = "poster.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+packages = ["poster"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
