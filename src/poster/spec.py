@@ -162,29 +162,33 @@ def rich_text(text: str, base: str = "black", accent: str = "red") \
     角标取 ``""`` / ``"sup"`` / ``"sub"``。化学式与单位必须写成角标形式，
     例如 ``Fe^{3+}``、``元/m^{2}``、``I_{D}/I_{G}`` —— 直接写 ``Fe3+`` 属于
     排版错误（合规项 ``E7`` 会拦）。想输出字面量 ``^{``，写成 ``\\^{``。
+
+    **扫描顺序：先强调、再角标。** 反过来先切角标，``**`` 一旦跨越角标就会
+    两端各剩半个标记 —— ``**元/m^{2}**`` 会被切成 ``**元/m`` / ``2`` / ``**``，
+    ``**`` 配对失败、原样排上墙。强调是外层、角标是叶子，这个方向才闭合。
     """
     out: list[tuple[str, str, str]] = []
 
-    def push(text_: str, color: str, script: str = "") -> None:
-        # 逐个片段再切一遍强调，保证 ``**`` 与角标可以嵌套
+    def scan(text_: str, color: str) -> None:
+        """把一段不含 ``**`` 的文本按角标切碎。"""
         pos = 0
-        for m in _EMPH_RE.finditer(text_):
+        for m in _SCRIPT_RE.finditer(text_):
             if m.start() > pos:
-                out.append((text_[pos:m.start()], color, script))
-            out.append((m.group(1), accent, script))
+                out.append((text_[pos:m.start()], color, ""))
+            body = m.group(2).replace("\\^{", "^{").replace("\\_{", "_{")
+            out.append((body, color, "sup" if m.group(1) == "^" else "sub"))
             pos = m.end()
         if pos < len(text_):
-            out.append((text_[pos:], color, script))
+            out.append((text_[pos:], color, ""))
 
     pos = 0
-    for m in _SCRIPT_RE.finditer(text):
+    for m in _EMPH_RE.finditer(text):
         if m.start() > pos:
-            push(text[pos:m.start()], base)
-        body = m.group(2).replace("\\^{", "^{").replace("\\_{", "_{")
-        push(body, base, "sup" if m.group(1) == "^" else "sub")
+            scan(text[pos:m.start()], base)
+        scan(m.group(1), accent)
         pos = m.end()
     if pos < len(text):
-        push(text[pos:], base)
+        scan(text[pos:], base)
     return [(t, c, s) for t, c, s in out if t]
 
 

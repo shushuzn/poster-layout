@@ -72,6 +72,27 @@ def test_script_markup_can_be_escaped():
     assert "^{x}" in "".join(t for t, _, _ in segs)
 
 
+def test_emphasis_spanning_script_markup():
+    """``**`` 跨角标时必须整体标红，不得把 ``**`` 字面排上墙。
+
+    回归用例：先切角标再找 ``**`` 的旧实现会把 ``**元/m^{2}**`` 切成
+    ``**元/m`` / ``2`` / ``**``，两端各半个标记 → 配对失败、字面泄漏。
+    """
+    segs = spec.rich_text("成本 **12.34 元/m^{2}，低 20 倍**。")
+    txt = "".join(t for t, _, _ in segs)
+    assert "**" not in txt, segs
+    assert txt == "成本 12.34 元/m2，低 20 倍。"
+    assert [(t, c) for t, c, s in segs if t in ("12.34 元/m", "，低 20 倍")] == \
+        [("12.34 元/m", "red"), ("，低 20 倍", "red")], segs
+    assert [s for _, _, s in segs if s] == ["sup"], segs
+
+
+def test_emphasis_around_whole_formula():
+    """``**Fe^{3+}**``：整串标红，角标仍是角标。"""
+    segs = spec.rich_text("**Fe^{3+}**")
+    assert segs == [("Fe", "red", ""), ("3+", "red", "sup")], segs
+
+
 def test_plain_text_kept_verbatim():
     s = "含 数字 42 与符号 %/°C（括号）——破折号。"
     assert spec.rich_text(s) == [(s, "black", "")]

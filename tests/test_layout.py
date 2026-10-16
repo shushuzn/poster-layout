@@ -313,3 +313,23 @@ def test_script_runs_are_written_as_baseline():
     assert got == ["Fe", "3+", " 与 m", "2"], got
     assert base[0] is None and base[2] is None, "普通文字不该带 baseline"
     assert base[1] == "30000" and base[3] == "-25000", base
+
+
+def test_script_offset_is_one_glyph_scale():
+    """预览里的角标位移必须落在字高量级内（上限 = 半个字高）。
+
+    回归用例：``_script_dy`` 曾把 ``PX_PER_CM`` 与 ``scale`` 相乘两次，
+    3.65pt 的上标被算成 -1545px、直接画到画布外 —— 预览里 ``Fe`` 后只剩一块
+    空白，看着像"角标没渲染"，而产物其实是好的。这条锁住"预览与实排同口径"。
+    """
+    from poster import preview as P
+
+    sc = C.PX_PER_CM
+    glyph_px = 3.65 * C.PT2CM * sc            # 3.65pt 字高（px）
+    sup = P._script_dy("sup", 3.65, sc)
+    sub = P._script_dy("sub", 3.65, sc)
+    assert sup < 0 < sub, (sup, sub)          # 上标向上、下标向下
+    assert abs(sup) < glyph_px / 2 and abs(sub) < glyph_px / 2, (sup, sub, glyph_px)
+    assert P._script_dy("", 3.65, sc) == 0.0
+    # 位移与字号成正比：换字号只改幅度，不改口径
+    assert abs(P._script_dy("sup", 7.3, sc)) > abs(sup), "位移应随字号线性变化"

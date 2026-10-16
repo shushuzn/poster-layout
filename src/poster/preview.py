@@ -30,11 +30,15 @@ def _script_dy(script: str, size_pt: float, scale: float) -> float:
 
     PowerPoint 的角标只把字形整体位移、不改变字号，预览也必须照做，
     否则交叉审核时看到的与实排不一致。
+
+    ``scale`` 已经是「像素 / 厘米」，所以这里**只乘一次**。曾经多乘了一个
+    ``C.PX_PER_CM``：3.65pt 的上标算出来 -1545px，被甩到画布外，预览里
+    只剩下 ``Fe`` 后面的一块空白 —— 产物本身是对的，是预览把人骗了。
     """
     pct = C.SCRIPT_BASELINE.get(script)
     if pct is None:
         return 0.0
-    return -pct / 100000.0 * size_pt * C.PT2CM * C.PX_PER_CM * scale
+    return -pct / 100000.0 * size_pt * C.PT2CM * scale
 
 
 # ---------------------------------------------------------------- 底图
@@ -181,7 +185,7 @@ def render(lay: Layout, task, figs, base: Image.Image | None = None,
                 extra = 0.0 if last else (c.tw * sc - lw)
                 sp = extra / (len(ln) - 1) if (not last and len(ln) > 1) else 0.0
                 for seg in ln:
-                    tok, color, script = T.unpack(seg)
+                    tok, color, script = unpack(seg)
                     dy = _script_dy(script, lay.body_pt, sc)
                     dr.text((x, yy * sc + dy), tok, font=body_font, fill=color)
                     x += body_font.getlength(tok) + sp
